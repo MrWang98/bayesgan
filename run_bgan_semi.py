@@ -368,6 +368,31 @@ if __name__ == "__main__":
                         default="sgd",
                         help="optimizer --- 'adam' or 'sgd'")
 
+    #添加的参数====================================================================
+    parser.add_argument('--nb_labels',
+                        type=int,
+                        default=10)
+
+    parser.add_argument('--nb_teachers',
+                        type=int,
+                        default=2)
+
+    parser.add_argument('--deeper',
+                        type=bool,
+                        default=False)
+
+    parser.add_argument('--lap_scale',
+                        type=float,
+                        default=0.1)
+
+    parser.add_argument('--teacher_dir',
+                        type=str,
+                        default='tmp/train_dir')
+
+    parser.add_argument('--teachers_max_steps',
+                        type=int,
+                        default=3000)
+
     
     args = parser.parse_args()
 
@@ -394,7 +419,7 @@ if __name__ == "__main__":
     #imagenet_path = os.path.join(args.data_path, "imagenet")
 
     if args.dataset == "mnist":
-        dataset = MnistDataset(mnist_path)
+        dataset = MnistDataset(mnist_path,args.N)
     elif args.dataset == "celeb":
         dataset = CelebDataset(celeb_path)
     elif args.dataset == "cifar":

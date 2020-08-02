@@ -1,19 +1,20 @@
 import json
 import time
+import numpy as np
+import os
+import tensorflow as tf
 
-d_losses=[0.01,0.02]
-g_losses=[0.03,0.04]
+labels_t=[[[1],2,3],[[2],4,5,6],[[3],7,8,9]]
+labels=np.array(labels_t)
+j_t=np.array(labels)
+t_t=np.array(labels)
 
-tmp1=list(map(float, d_losses))
-tmp2=list(map(float, g_losses))
+datafile="test.npy"
+if os.path.exists(datafile):
+    with tf.gfile.Open(datafile, mode='rb') as file_obj:
+        jt,tt=np.load(file_obj)
+else:
+    t=(j_t,t_t)
+    np.save(datafile,t)
 
-
-s_acc=92.25
-ss_acc=86.79
-results = {"disc_losses": tmp1,
-            "gen_losses": tmp2,
-            "supervised_acc": float(s_acc),
-            "semi_supervised_acc": float(ss_acc),
-            "timestamp": time.time()}
-with open('results_test.json', 'w') as fp:
-    json.dump(results, fp)
+print(j_t)

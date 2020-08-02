@@ -30,12 +30,22 @@ import utils
 FLAGS = tf.app.flags.FLAGS
 
 # Basic model parameters.
-tf.app.flags.DEFINE_integer('dropout_seed', 123, """seed for dropout.""")
-tf.app.flags.DEFINE_integer('batch_size', 24, """Nb of images in a batch.""")
-tf.app.flags.DEFINE_integer('epochs_per_decay', 350, """Nb epochs per decay""")
-tf.app.flags.DEFINE_integer('learning_rate', 5, """100 * learning rate""")
-tf.app.flags.DEFINE_boolean('log_device_placement', False, """see TF doc""")
-
+dropout_seed=123
+batch_size=24
+epochs_per_decay=350
+learning_rate=5
+log_device_placement=False
+dataset='mnist'
+nb_labels=10
+nb_teachers=2
+deeper=False
+lap_scale=0.1
+teachers_dir='tmp/train_dir'
+teachers_max_steps=3000
+data_dir='tmp/mnist'
+train_dir='tmp/train_dir'
+max_steps=3000
+teacher_id=0
 
 # Constants describing the training process.
 MOVING_AVERAGE_DECAY = 0.9999     # The decay to use for the moving average.
@@ -90,7 +100,7 @@ def inference(images, dropout=False):
   Returns:
     Logits
   """
-  if FLAGS.dataset == 'mnist':
+  if dataset == 'mnist':
     first_conv_shape = [5, 5, 1, 64]
   else:
     first_conv_shape = [5, 5, 3, 64]
@@ -106,7 +116,7 @@ def inference(images, dropout=False):
     bias = tf.nn.bias_add(conv, biases)
     conv1 = tf.nn.relu(bias, name=scope.name)
     if dropout:
-      conv1 = tf.nn.dropout(conv1, 0.3, seed=FLAGS.dropout_seed)
+      conv1 = tf.nn.dropout(conv1, 0.3, seed=dropout_seed)
 
 
   # pool1
@@ -135,7 +145,7 @@ def inference(images, dropout=False):
     bias = tf.nn.bias_add(conv, biases)
     conv2 = tf.nn.relu(bias, name=scope.name)
     if dropout:
-      conv2 = tf.nn.dropout(conv2, 0.3, seed=FLAGS.dropout_seed)
+      conv2 = tf.nn.dropout(conv2, 0.3, seed=dropout_seed)
 
 
   # norm2
@@ -156,7 +166,7 @@ def inference(images, dropout=False):
   # local3
   with tf.variable_scope('local3') as scope:
     # Move everything into depth so we can perform a single matrix multiply.
-    reshape = tf.reshape(pool2, [FLAGS.batch_size, -1])
+    reshape = tf.reshape(pool2, [batch_size, -1])
     dim = reshape.get_shape()[1]
     weights = _variable_with_weight_decay('weights',
                                           shape=[dim, 384],
@@ -165,7 +175,7 @@ def inference(images, dropout=False):
     biases = _variable_on_cpu('biases', [384], tf.constant_initializer(0.1))
     local3 = tf.nn.relu(tf.matmul(reshape, weights) + biases, name=scope.name)
     if dropout:
-      local3 = tf.nn.dropout(local3, 0.5, seed=FLAGS.dropout_seed)
+      local3 = tf.nn.dropout(local3, 0.5, seed=dropout_seed)
 
   # local4
   with tf.variable_scope('local4') as scope:
@@ -176,16 +186,16 @@ def inference(images, dropout=False):
     biases = _variable_on_cpu('biases', [192], tf.constant_initializer(0.1))
     local4 = tf.nn.relu(tf.matmul(local3, weights) + biases, name=scope.name)
     if dropout:
-      local4 = tf.nn.dropout(local4, 0.5, seed=FLAGS.dropout_seed)
+      local4 = tf.nn.dropout(local4, 0.5, seed=dropout_seed)
 
   # compute logits
   with tf.variable_scope('softmax_linear') as scope:
     weights = _variable_with_weight_decay('weights',
-                                          [192, FLAGS.nb_labels],
+                                          [192, nb_labels],
                                           stddev=1/192.0,
                                           wd=0.0)
     biases = _variable_on_cpu('biases',
-                              [FLAGS.nb_labels],
+                              [nb_labels],
                               tf.constant_initializer(0.0))
     logits = tf.add(tf.matmul(local4, weights), biases, name=scope.name)
 
@@ -200,7 +210,7 @@ def inference_deeper(images, dropout=False):
   Returns:
     Logits
   """
-  if FLAGS.dataset == 'mnist':
+  if dataset == 'mnist':
     first_conv_shape = [3, 3, 1, 96]
   else:
     first_conv_shape = [3, 3, 3, 96]
@@ -238,7 +248,7 @@ def inference_deeper(images, dropout=False):
     bias = tf.nn.bias_add(conv, biases)
     conv3 = tf.nn.relu(bias, name=scope.name)
     if dropout:
-      conv3 = tf.nn.dropout(conv3, 0.5, seed=FLAGS.dropout_seed)
+      conv3 = tf.nn.dropout(conv3, 0.5, seed=dropout_seed)
 
   # conv4
   with tf.variable_scope('conv4') as scope:
@@ -273,7 +283,7 @@ def inference_deeper(images, dropout=False):
     bias = tf.nn.bias_add(conv, biases)
     conv6 = tf.nn.relu(bias, name=scope.name)
     if dropout:
-      conv6 = tf.nn.dropout(conv6, 0.5, seed=FLAGS.dropout_seed)
+      conv6 = tf.nn.dropout(conv6, 0.5, seed=dropout_seed)
 
 
   # conv7
@@ -291,7 +301,7 @@ def inference_deeper(images, dropout=False):
   # local1
   with tf.variable_scope('local1') as scope:
     # Move everything into depth so we can perform a single matrix multiply.
-    reshape = tf.reshape(conv7, [FLAGS.batch_size, -1])
+    reshape = tf.reshape(conv7, [batch_size, -1])
     dim = reshape.get_shape()[1].value
     weights = _variable_with_weight_decay('weights',
                                           shape=[dim, 192],
@@ -309,16 +319,16 @@ def inference_deeper(images, dropout=False):
     biases = _variable_on_cpu('biases', [192], tf.constant_initializer(0.1))
     local2 = tf.nn.relu(tf.matmul(local1, weights) + biases, name=scope.name)
     if dropout:
-      local2 = tf.nn.dropout(local2, 0.5, seed=FLAGS.dropout_seed)
+      local2 = tf.nn.dropout(local2, 0.5, seed=dropout_seed)
 
   # compute logits
   with tf.variable_scope('softmax_linear') as scope:
     weights = _variable_with_weight_decay('weights',
-                                          [192, FLAGS.nb_labels],
+                                          [192, nb_labels],
                                           stddev=0.05,
                                           wd=0.0)
     biases = _variable_on_cpu('biases',
-                              [FLAGS.nb_labels],
+                              [nb_labels],
                               tf.constant_initializer(0.0))
     logits = tf.add(tf.matmul(local2, weights), biases, name=scope.name)
 
@@ -387,12 +397,12 @@ def train_op_fun(total_loss, global_step):
     train_op: op for training.
   """
   # Variables that affect learning rate.
-  nb_ex_per_train_epoch = int(60000 / FLAGS.nb_teachers)
+  nb_ex_per_train_epoch = int(60000 / nb_teachers)
 
-  num_batches_per_epoch = nb_ex_per_train_epoch / FLAGS.batch_size
-  decay_steps = int(num_batches_per_epoch * FLAGS.epochs_per_decay)
+  num_batches_per_epoch = nb_ex_per_train_epoch / batch_size
+  decay_steps = int(num_batches_per_epoch * epochs_per_decay)
 
-  initial_learning_rate = float(FLAGS.learning_rate) / 100.0
+  initial_learning_rate = float(learning_rate) / 100.0
 
   # Decay the learning rate exponentially based on the number of steps.
   lr = tf.train.exponential_decay(initial_learning_rate,
@@ -433,7 +443,7 @@ def _input_placeholder():
   This helper function declares a TF placeholder for the graph input data
   :return: TF placeholder for the graph input data
   """
-  if FLAGS.dataset == 'mnist':
+  if dataset == 'mnist':
     image_size = 28
     num_channels = 1
   else:
@@ -441,7 +451,7 @@ def _input_placeholder():
     num_channels = 3
 
   # Declare data placeholder
-  train_node_shape = (FLAGS.batch_size, image_size, image_size, num_channels)
+  train_node_shape = (batch_size, image_size, image_size, num_channels)
   return tf.placeholder(tf.float32, shape=train_node_shape)
 
 
@@ -468,13 +478,13 @@ def train(images, labels, ckpt_path, dropout=False):
     train_data_node = _input_placeholder()
 
     # Create a placeholder to hold labels
-    train_labels_shape = (FLAGS.batch_size,)
+    train_labels_shape = (batch_size,)
     train_labels_node = tf.placeholder(tf.int32, shape=train_labels_shape)
 
     print("Done Initializing Training Placeholders")
 
     # Build a Graph that computes the logits predictions from the placeholder
-    if FLAGS.deeper:
+    if deeper:
       logits = inference_deeper(train_data_node, dropout=dropout)
     else:
       logits = inference(train_data_node, dropout=dropout)
@@ -495,16 +505,16 @@ def train(images, labels, ckpt_path, dropout=False):
     init = tf.global_variables_initializer()
 
     # Create and init sessions
-    sess = tf.Session(config=tf.ConfigProto(log_device_placement=FLAGS.log_device_placement)) #NOLINT(long-line)
+    sess = tf.Session(config=tf.ConfigProto(log_device_placement=log_device_placement)) #NOLINT(long-line)
     sess.run(init)
 
     print("Session ready, beginning training loop")
 
     # Initialize the number of batches
     data_length = len(images)
-    nb_batches = math.ceil(data_length / FLAGS.batch_size)
+    nb_batches = math.ceil(data_length / batch_size)
 
-    for step in xrange(FLAGS.max_steps):
+    for step in xrange(max_steps):
       # for debug, save start time
       start_time = time.time()
 
@@ -512,7 +522,7 @@ def train(images, labels, ckpt_path, dropout=False):
       batch_nb = step % nb_batches
 
       # Current batch start and end indices
-      start, end = utils.batch_indices(batch_nb, data_length, FLAGS.batch_size)
+      start, end = utils.batch_indices(batch_nb, data_length, batch_size)
 
       # Prepare dictionnary to feed the session with
       feed_dict = {train_data_node: images[start:end],
@@ -529,7 +539,7 @@ def train(images, labels, ckpt_path, dropout=False):
 
       # Echo loss once in a while
       if step % 100 == 0:
-        num_examples_per_step = FLAGS.batch_size
+        num_examples_per_step = batch_size
         examples_per_sec = num_examples_per_step / duration
         sec_per_batch = float(duration)
 
@@ -539,7 +549,7 @@ def train(images, labels, ckpt_path, dropout=False):
                              examples_per_sec, sec_per_batch))
 
       # Save the model checkpoint periodically.
-      if step % 1000 == 0 or (step + 1) == FLAGS.max_steps:
+      if step % 1000 == 0 or (step + 1) == max_steps:
         saver.save(sess, ckpt_path, global_step=step)
 
   return True
@@ -556,13 +566,13 @@ def softmax_preds(images, ckpt_path, return_logits=False):
   """
   # Compute nb samples and deduce nb of batches
   data_length = len(images)
-  nb_batches = math.ceil(len(images) / FLAGS.batch_size)
+  nb_batches = math.ceil(len(images) / batch_size)
 
   # Declare data placeholder
   train_data_node = _input_placeholder()
 
   # Build a Graph that computes the logits predictions from the placeholder
-  if FLAGS.deeper:
+  if deeper:
     logits = inference_deeper(train_data_node)
   else:
     logits = inference(train_data_node)
@@ -580,7 +590,7 @@ def softmax_preds(images, ckpt_path, return_logits=False):
   saver = tf.train.Saver(variables_to_restore)
 
   # Will hold the result
-  preds = np.zeros((data_length, FLAGS.nb_labels), dtype=np.float32)
+  preds = np.zeros((data_length, nb_labels), dtype=np.float32)
 
   # Create TF session
   with tf.Session() as sess:
@@ -590,7 +600,7 @@ def softmax_preds(images, ckpt_path, return_logits=False):
     # Parse data by batch
     for batch_nb in xrange(0, int(nb_batches+1)):
       # Compute batch start and end indices
-      start, end = utils.batch_indices(batch_nb, data_length, FLAGS.batch_size)
+      start, end = utils.batch_indices(batch_nb, data_length, batch_size)
 
       # Prepare feed dictionary
       feed_dict = {train_data_node: images[start:end]}

@@ -30,12 +30,28 @@ import aggregation
 import random
 import deep_cnn
 
+'''
 FLAGS = tf.flags.FLAGS
-
+tf.flags.DEFINE_string('data_path', 'mnist', 'The name of the dataset to use')
 tf.flags.DEFINE_string('dataset', 'mnist', 'The name of the dataset to use')
 tf.flags.DEFINE_integer('nb_labels', 10, 'Number of output classes')
-tf.flags.DEFINE_integer('nb_teachers', 20, 'Teachers in the ensemble.')
+tf.flags.DEFINE_integer('nb_teachers', 2, 'Teachers in the ensemble.')
+tf.flags.DEFINE_boolean('deeper', False, 'Activate deeper CNN model')
+tf.flags.DEFINE_float('lap_scale', 0.1,
+                        'Scale of the Laplacian noise added for privacy')
+tf.flags.DEFINE_string('teachers_dir','tmp/train_dir',
+                       'Directory where teachers checkpoints are stored.')
+tf.flags.DEFINE_integer('teachers_max_steps', 3000,
+                        'Number of steps teachers were ran.')
+'''
 
+dataset='mnist'
+nb_labels=10
+nb_teachers=2
+deeper=False
+lap_scale=0.1
+teachers_dir='tmp/train_dir'
+teachers_max_steps=3000
 
 def one_hot_encoded(class_numbers, num_classes):
     return np.eye(num_classes, dtype=float)[class_numbers]
@@ -69,7 +85,7 @@ def ensemble_preds(dataset, nb_teachers, stdnt_data):
 
   # Compute shape of array that will hold probabilities produced by each
   # teacher, for each training point, and each output class
-  result_shape = (nb_teachers, len(stdnt_data), FLAGS.nb_labels)
+  result_shape = (nb_teachers, len(stdnt_data), nb_labels)
 
   # Create array that will hold result
   result = np.zeros(result_shape, dtype=np.float32)
@@ -77,10 +93,10 @@ def ensemble_preds(dataset, nb_teachers, stdnt_data):
   # Get predictions from each teacher
   for teacher_id in xrange(nb_teachers):
     # Compute path of checkpoint file for teacher model with ID teacher_id
-    if FLAGS.deeper:
-      ckpt_path = FLAGS.teachers_dir + '/' + str(dataset) + '_' + str(nb_teachers) + '_teachers_' + str(teacher_id) + '_deep.ckpt-' + str(FLAGS.teachers_max_steps - 1) #NOLINT(long-line)
+    if deeper:
+      ckpt_path = teachers_dir + '/' + str(dataset) + '_' + str(nb_teachers) + '_teachers_' + str(teacher_id) + '_deep.ckpt-' + str(teachers_max_steps - 1) #NOLINT(long-line)
     else:
-      ckpt_path = FLAGS.teachers_dir + '/' + str(dataset) + '_' + str(nb_teachers) + '_teachers_' + str(teacher_id) + '.ckpt-' + str(FLAGS.teachers_max_steps - 1)  # NOLINT(long-line)
+      ckpt_path = teachers_dir + '/' + str(dataset) + '_' + str(nb_teachers) + '_teachers_' + str(teacher_id) + '.ckpt-' + str(teachers_max_steps - 1)  # NOLINT(long-line)
 
     # Get predictions on our training data and store in result array
     result[teacher_id] = deep_cnn.softmax_preds(stdnt_data, ckpt_path)
@@ -311,7 +327,7 @@ class MnistDataset():
         
         from tensorflow.examples.tutorials.mnist import input_data
         #=======================================================
-        validation_size = 5000
+        validation_size = 500
         dtype = dtypes.float32
         reshape = True
         seed = None
@@ -326,31 +342,13 @@ class MnistDataset():
 
 
         #修改这部分代码,train_image为ndarray(60000,28,28,1),train_labels为ndarray(60000,10)-----------------------------------------------------
-        local_file = base.maybe_download(TRAIN_IMAGES, data_dir,
-                                         source_url + TRAIN_IMAGES)
-        with gfile.Open(local_file, 'rb') as f:
-            test_data = extract_images(f)
-
-        local_file = base.maybe_download(TRAIN_LABELS, data_dir,
-                                         source_url + TRAIN_LABELS)
-        with gfile.Open(local_file, 'rb') as f:
-            test_data_labels = extract_labels(f, one_hot=one_hot)
-
-        all_index = [i for i in range(len(test_data))]
-        test_index, train_index = getRandomTrain(all_index, data_share)
-        train_bool = np.full(len(test_data), False)
-        test_bool = np.full(len(test_data), True)
-        for i in train_index:
-            train_bool[i] = True
-            test_bool[i] = False
-        train_images = test_data[train_bool]
-        teachers_preds = ensemble_preds('mnist', FLAGS.nb_teachers, train_images)
-        #根据教师模型获得标签，需要对标签进行处理
-        train_labels, clean_votes, labels_for_dump = aggregation.noisy_max(teachers_preds, FLAGS.lap_scale,
-                                                                           return_clean_votes=True)  # NOLINT(long-line)
-        #对标签进行处理
-
-
+        train_images,train_labels=self.ld_data(data_dir,data_share)
+        '''读取真实数据的标签
+            local_file = base.maybe_download(TRAIN_LABELS, data_dir,
+                                             source_url + TRAIN_LABELS)
+            with gfile.Open(local_file, 'rb') as f:
+                test_data_labels = extract_labels(f, one_hot=one_hot)
+        '''
         #----------------------------------------------------------------
 
         local_file = base.maybe_download(TEST_IMAGES, data_dir,
@@ -377,15 +375,15 @@ class MnistDataset():
         train = DataSet(train_images, train_labels, **options)
         validation = DataSet(validation_images, validation_labels, **options)
         test = DataSet(test_images, test_labels, **options)
-        #===========================================================================
+        #===================================================================================
 
-        #返回原来时去掉注释self.mnist = input_data.read_data_sets(data_dir, one_hot=True)
+        #self.mnist = input_data.read_data_sets(data_dir, one_hot=True)
         #下面的一行是上面更改后的
         self.mnist = base.Datasets(train=train, validation=validation, test=test)
 
         self.x_dim = [28, 28, 1]
         self.num_classes = 10
-        self.dataset_size = self.mnist.train.images.shape[0]
+        self.dataset_size = self.mnist.train._images.shape[0]
         
     def next_batch(self, batch_size, class_id=None):
         
@@ -419,15 +417,50 @@ class MnistDataset():
         return new_image_batch, labels
 
     def get_test_set(self):
-        test_imgs = self.mnist.test.images
+        test_imgs = self.mnist.test._images
         test_images = np.array([(test_imgs[n]*2. - 1.).reshape((28, 28, 1))
                                 for n in range(test_imgs.shape[0])])
         test_labels = self.mnist.test.labels
         return test_images, test_labels
 
+    def ld_data(self, data_dir, data_share):
+        source_url = 'https://storage.googleapis.com/cvdf-datasets/mnist/'
+        TRAIN_IMAGES = 'train-images-idx3-ubyte.gz'
+        local_file = base.maybe_download(TRAIN_IMAGES, data_dir,
+                                             source_url + TRAIN_IMAGES)
+        with gfile.Open(local_file, 'rb') as f:
+            test_data = extract_images(f)
+            '''读取真实数据的标签
+            local_file = base.maybe_download(TRAIN_LABELS, data_dir,
+                                             source_url + TRAIN_LABELS)
+            with gfile.Open(local_file, 'rb') as f:
+                test_data_labels = extract_labels(f, one_hot=one_hot)
+            '''
+        all_index = [i for i in range(len(test_data))]
+        test_index, train_index = getRandomTrain(all_index, data_share)
+        train_bool = np.full(len(test_data), False)
+        test_bool = np.full(len(test_data), True)
+        for i in train_index:
+            train_bool[i] = True
+            test_bool[i] = False
+        train_images = test_data[train_bool]
+        teachers_preds = ensemble_preds('mnist', nb_teachers, train_images)
+        # 根据教师模型获得暂时的标签，需要对标签进行处理
+        train_labels_t, clean_votes, labels_for_dump = aggregation.noisy_max(teachers_preds, lap_scale,
+                                                                               return_clean_votes=True)  # NOLINT(long-line)
+        # 对标签进行处理
+        train_labels=self.deal(train_labels_t)
 
-        
-        
+        return train_images,train_labels
+
+    def deal(self,labels):
+        train_labels=[]
+        for i in labels:
+            tmp=np.full(10,0)
+            tmp[i]=1
+            train_labels.append(tmp)
+        return np.array(train_labels)
+
 class CelebDataset():
         
     def __init__(self, path):
