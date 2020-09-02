@@ -45,11 +45,11 @@ tf.flags.DEFINE_integer('teachers_max_steps', 3000,
                         'Number of steps teachers were ran.')
 '''
 
-dataset='mnist'
+dataset='svhn'
 nb_labels=10
 nb_teachers=2
 deeper=False
-lap_scale=0.1
+lap_scale=0.001
 teachers_dir='tmp/train_dir'
 teachers_max_steps=3000
 
@@ -324,8 +324,9 @@ class SynthDataset():
 class MnistDataset():
     
     def __init__(self, data_dir, data_share):
-        
+
         from tensorflow.examples.tutorials.mnist import input_data
+        '''
         #=======================================================
         validation_size = 500
         dtype = dtypes.float32
@@ -340,17 +341,12 @@ class MnistDataset():
         TEST_IMAGES = 't10k-images-idx3-ubyte.gz'
         TEST_LABELS = 't10k-labels-idx1-ubyte.gz'
 
-
+        
         #修改这部分代码,train_image为ndarray(60000,28,28,1),train_labels为ndarray(60000,10)-----------------------------------------------------
         train_images,train_labels=self.ld_data(data_dir,data_share)
-        '''读取真实数据的标签
-            local_file = base.maybe_download(TRAIN_LABELS, data_dir,
-                                             source_url + TRAIN_LABELS)
-            with gfile.Open(local_file, 'rb') as f:
-                test_data_labels = extract_labels(f, one_hot=one_hot)
-        '''
+        
         #----------------------------------------------------------------
-
+        
         local_file = base.maybe_download(TEST_IMAGES, data_dir,
                                          source_url + TEST_IMAGES)
         with gfile.Open(local_file, 'rb') as f:
@@ -376,10 +372,11 @@ class MnistDataset():
         validation = DataSet(validation_images, validation_labels, **options)
         test = DataSet(test_images, test_labels, **options)
         #===================================================================================
+        '''
 
-        #self.mnist = input_data.read_data_sets(data_dir, one_hot=True)
+        self.mnist = input_data.read_data_sets(data_dir, one_hot=True)
         #下面的一行是上面更改后的
-        self.mnist = base.Datasets(train=train, validation=validation, test=test)
+        #self.mnist = base.Datasets(train=train, validation=validation, test=test)
 
         self.x_dim = [28, 28, 1]
         self.num_classes = 10
@@ -426,16 +423,18 @@ class MnistDataset():
     def ld_data(self, data_dir, data_share):
         source_url = 'https://storage.googleapis.com/cvdf-datasets/mnist/'
         TRAIN_IMAGES = 'train-images-idx3-ubyte.gz'
+        TRAIN_LABELS = 'train-labels-idx1-ubyte.gz'
+        one_hot = False
         local_file = base.maybe_download(TRAIN_IMAGES, data_dir,
                                              source_url + TRAIN_IMAGES)
         with gfile.Open(local_file, 'rb') as f:
             test_data = extract_images(f)
-            '''读取真实数据的标签
+            #读取真实数据的标签
             local_file = base.maybe_download(TRAIN_LABELS, data_dir,
                                              source_url + TRAIN_LABELS)
             with gfile.Open(local_file, 'rb') as f:
                 test_data_labels = extract_labels(f, one_hot=one_hot)
-            '''
+            
         all_index = [i for i in range(len(test_data))]
         test_index, train_index = getRandomTrain(all_index, data_share)
         train_bool = np.full(len(test_data), False)
@@ -460,6 +459,7 @@ class MnistDataset():
             tmp[i]=1
             train_labels.append(tmp)
         return np.array(train_labels)
+
 
 class CelebDataset():
         
@@ -551,19 +551,26 @@ class SVHN():
 
     def __init__(self, path, subsample=None):
 
+
         train_data = sio.loadmat(os.path.join(path, "train_32x32.mat"))
         test_data = sio.loadmat(os.path.join(path, "test_32x32.mat"))
 
-        self.imgs = train_data["X"] / 255.
-        self.imgs = self.imgs * 2 - 1.
-        self.imgs = np.transpose(self.imgs, [3, 0, 1, 2])
+
+        '''tmp=np.transpose(train_data["X"],[3,0,1,2])[0:100]
+        np.save("test.npy", tmp)
+
+        self.imgs2 = train_data["X"] / 255.
+        self.imgs2 = self.imgs2 * 2 - 1.
+        self.imgs2 = np.transpose(self.imgs2, [3, 0, 1, 2])'''
+
+        self.imgs,self.labels=self.ld_data(path)
 
         self.test_imgs = test_data["X"] / 255.
         self.test_imgs = self.test_imgs * 2 - 1.
         self.test_imgs = np.transpose(self.test_imgs, [3, 0, 1, 2])
 
-        self.labels = np.array([yy[0]-1 for yy in train_data["y"]])
-        self.labels = one_hot_encoded(self.labels, 10)
+        '''self.labels_t = np.array([yy[0]-1 for yy in train_data["y"]])
+        self.labels_t = one_hot_encoded(self.labels_t, 10)'''
 
         self.test_labels = np.array([yy[0]-1 for yy in test_data["y"]])
         self.test_labels = one_hot_encoded(self.test_labels, 10)
@@ -577,6 +584,37 @@ class SVHN():
                                         size=(int(self.imgs.shape[0]*subsample),), 
                                         replace=False)  
             self.imgs, self.labels = self.imgs[rand_idx], self.labels[rand_idx]
+
+    def ld_data(self,path):
+        data_share = 10000
+        train_data = sio.loadmat(os.path.join(path, "train_32x32.mat"))
+        imgs = train_data["X"] / 255.
+        imgs = imgs * 2 - 1.
+        imgs = np.transpose(imgs, [3, 0, 1, 2])
+        labels = np.array([yy[0] - 1 for yy in train_data["y"]])
+        labels = one_hot_encoded(labels, 10)
+
+        '''all_index = [i for i in range(len(imgs))]
+        test_index, train_index = getRandomTrain(all_index, data_share)
+        train_bool = np.full(len(imgs), False)
+        for i in train_index:
+            train_bool[i] = True'''
+        train_images = imgs[0:10000]
+        teachers_preds = ensemble_preds('svhn', nb_teachers, train_images)
+        # 根据教师模型获得暂时的标签，需要对标签进行处理
+        train_labels_t, clean_votes, labels_for_dump = aggregation.noisy_max(teachers_preds, lap_scale,
+                                                                             return_clean_votes=True)  # NOLINT(long-line)
+        # 对标签进行处理
+        train_labels = self.deal(train_labels_t)
+
+        return train_images, train_labels
+
+    def deal(self, labels):
+        train_labels = np.eye(10, dtype=float)[labels-1]
+        '''for i in labels:
+            tmp = np.eye(10, dtype=float)[10]
+            train_labels.append(tmp)'''
+        return train_labels
 
     def next_batch(self, batch_size, class_id=None):
         rand_idx = np.random.choice(range(self.imgs.shape[0]), size=(batch_size,), replace=False)    
